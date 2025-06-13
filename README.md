@@ -50,7 +50,7 @@ Fitur
 
 ### Dataset: 
 [🔗 For Training](https://drive.google.com/drive/folders/1ID8L4sfX80BjmAtt9jvzUAiP5NjFhVB0?usp=sharing) 
-[🔗 For GUI](https://drive.google.com/drive/folders/1iDF_jcVEMP6cvj1_JCbO5-1Xkwixj09i?usp=drive_link)
+[🔗 For GUI](https://drive.google.com/drive/folders/15yEDcphooLdY2yXLDGBgi0s6OFrI1iil?usp=sharing)
 
 
 
