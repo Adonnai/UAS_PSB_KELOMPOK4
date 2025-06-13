@@ -1,1 +1,717 @@
+import os
+import zipfile
+import gdown
 
+# ✅ Google Drive shareable link (convert to direct download)
+file_id = '14NZqJspTGo1IM__jGma-cF7Oagtrzm2z'
+url = f'https://drive.google.com/uc?id={file_id}'
+
+# ✅ Output filename for the downloaded ZIP
+output = '/content/bone_marrow_dataset.zip'
+
+# ✅ Download dataset ZIP from Google Drive
+gdown.download(url, output, quiet=False)
+
+# ✅ Extract dataset to /content directory
+extract_path = '/content/bone_marrow_data'
+with zipfile.ZipFile(output, 'r') as zip_ref:
+    zip_ref.extractall(extract_path)
+
+# ✅ Explore the extracted directory structure
+for root, dirs, files in os.walk(extract_path):
+    print(f"{root} -> {len(files)} files")
+
+# 📦 Install dependencies
+!pip install opencv-python-headless scikit-image matplotlib pillow tqdm pandas
+
+# 📚 Imports
+import os
+import cv2
+import numpy as np
+import matplotlib.pyplot as plt
+from PIL import UnidentifiedImageError
+from collections import defaultdict
+import random
+
+# 📁 Dataset path
+dataset_path = '/content/bone_marrow_data'
+
+# 📌 Helper functions
+def is_image_file(file):
+    return file.lower().endswith(('.png', '.jpg', '.jpeg'))
+
+def detect_dark_image(image, threshold=0.1):
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    return np.mean(gray) < (threshold * 255)
+
+def detect_purple_staining(image, min_ratio=0.01):
+    hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+    lower_purple = np.array([120, 50, 50])
+    upper_purple = np.array([160, 255, 255])
+    mask = cv2.inRange(hsv, lower_purple, upper_purple)
+    ratio = np.sum(mask > 0) / (image.shape[0] * image.shape[1])
+    return ratio > min_ratio
+
+def get_color_type(image):
+    if len(image.shape) == 2:
+        return "Grayscale"
+    elif image.shape[2] == 3:
+        return "RGB"
+    else:
+        return f"Unknown {image.shape}"
+
+# 📊 Statistics containers
+report = {
+    "corrupt_files": [],
+    "dark_images": [],
+    "non_purple_images": [],
+    "color_types": defaultdict(int),
+    "class_samples": defaultdict(list)
+}
+
+# 🔍 Analyze dataset
+print("🔎 Analyzing dataset...")
+image_count = 0
+
+for root, dirs, files in os.walk(dataset_path):
+    class_name = os.path.basename(root)
+    image_files = [f for f in files if is_image_file(f)]
+    random.shuffle(image_files)
+
+    for fname in image_files:
+        path = os.path.join(root, fname)
+        try:
+            img = cv2.imread(path)
+            if img is None:
+                report["corrupt_files"].append(path)
+                continue
+            image_count += 1
+
+            # Resize for consistent analysis
+            img_resized = cv2.resize(img, (256, 256))
+
+            # Color type
+            color_type = get_color_type(img_resized)
+            report["color_types"][color_type] += 1
+
+            # Dark check
+            is_dark = detect_dark_image(img_resized)
+            if is_dark:
+                report["dark_images"].append(path)
+
+            # Purple staining check
+            has_purple = detect_purple_staining(img_resized)
+            if not has_purple:
+                report["non_purple_images"].append(path)
+
+            # Store up to 5 preview samples per group
+            if len(report["class_samples"][class_name]) < 5:
+                report["class_samples"][class_name].append((img_resized, fname, is_dark, has_purple, color_type))
+
+        except UnidentifiedImageError:
+            report["corrupt_files"].append(path)
+        except Exception as e:
+            report["corrupt_files"].append(path)
+
+# 📊 Final Summary
+print("\n📊 Dataset Quality Report:")
+print(f"📦 Total valid images analyzed   : {image_count}")
+print(f"❌ Corrupt or unreadable files   : {len(report['corrupt_files'])}")
+print(f"🌑 Too dark images               : {len(report['dark_images'])}")
+print(f"🟣 Non-purple-stained images     : {len(report['non_purple_images'])}")
+print("\n🌈 Image Type Distribution:")
+for color, count in report["color_types"].items():
+    print(f"  - {color}: {count}")
+
+# 🖼️ Sample Image Preview per Class
+print("\n📷 Previewing 5 Samples per Class:")
+n_cols = 5
+for class_name, samples in report["class_samples"].items():
+    print(f"\n🔹 Class: {class_name} ({len(samples)} samples)")
+    plt.figure(figsize=(15, 3))
+    for i, (img, fname, dark, purple, color_type) in enumerate(samples):
+        plt.subplot(1, n_cols, i + 1)
+        img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        plt.imshow(img_rgb)
+        plt.title(f"{fname}\nDark:{dark}, Purple:{purple}", fontsize=8)
+        plt.axis('off')
+    plt.tight_layout()
+    plt.show()
+
+
+import os
+import cv2
+import numpy as np
+import pandas as pd
+from tqdm import tqdm
+
+# ===== CONFIG =====
+dataset_path = '/content/bone_marrow_data'  #
+valid_extensions = ('.png', '.jpg', '.jpeg')
+blur_percentile = 30  # bottom 30% considered blurry
+
+# ===== COLLECT IMAGE INFO =====
+image_data = []
+lap_vars = []
+
+print("🔍 Reading and analyzing images...")
+
+for root, dirs, files in os.walk(dataset_path):
+    for file in tqdm(files):
+        if not file.lower().endswith(valid_extensions):
+            continue
+
+        path = os.path.join(root, file)
+        img = cv2.imread(path)
+
+        if img is None:
+            print(f"⚠️ Failed to read: {path}")
+            continue
+
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        lap_var = cv2.Laplacian(gray, cv2.CV_64F).var()
+
+        height, width, channels = img.shape
+        aspect_ratio = width / height
+        size = width * height
+
+        image_data.append({
+            'path': path,
+            'width': width,
+            'height': height,
+            'aspect_ratio': aspect_ratio,
+            'size_px': size,
+            'channels': channels,
+            'laplacian_variance': lap_var
+        })
+
+        lap_vars.append(lap_var)
+
+# ===== HANDLE EMPTY CASE =====
+if not lap_vars:
+    raise ValueError("❌ No Laplacian variance collected. All image reads failed.")
+
+# ===== CALCULATE BLUR THRESHOLD =====
+blur_threshold = np.percentile(lap_vars, blur_percentile)
+print(f"\n📉 Blurry image threshold (bottom {blur_percentile}%): Laplacian variance < {blur_threshold:.2f}")
+
+# ===== CONVERT TO DATAFRAME =====
+df = pd.DataFrame(image_data)
+df['is_blurry'] = df['laplacian_variance'] < blur_threshold
+
+# ===== SUMMARY =====
+total_images = len(df)
+blurry_count = df['is_blurry'].sum()
+avg_size = df['size_px'].mean()
+avg_aspect = df['aspect_ratio'].mean()
+avg_lap_var = df['laplacian_variance'].mean()
+
+print("\n📊 EDA Summary:")
+print(f"🔢 Total images: {total_images}")
+print(f"🟡 Blurry images: {blurry_count} ({(blurry_count/total_images)*100:.1f}%)")
+print(f"📏 Avg. image size (px): {avg_size:.0f}")
+print(f"🔲 Avg. aspect ratio (W/H): {avg_aspect:.2f}")
+print(f"📈 Avg. Laplacian variance: {avg_lap_var:.2f}")
+
+# ===== OPTIONAL: SAVE CSV =====
+output_csv_path = 'image_eda_result.csv'
+df.to_csv(output_csv_path, index=False)
+print(f"\n💾 Image EDA saved to: {output_csv_path}")
+
+
+import matplotlib.pyplot as plt
+
+# ===== UN-SHARP MASK FUNCTION =====
+def unsharp_mask(image, kernel_size=(5, 5), sigma=1.0, amount=1.5, threshold=0):
+    """Apply unsharp masking to an image."""
+    blurred = cv2.GaussianBlur(image, kernel_size, sigma)
+    sharpened = cv2.addWeighted(image, 1 + amount, blurred, -amount, 0)
+    if threshold > 0:
+        low_contrast_mask = np.abs(image - blurred) < threshold
+        np.copyto(sharpened, image, where=low_contrast_mask)
+    return sharpened
+
+# ===== PREVIEW BLUR FIXING =====
+print("\n🔍 Showing blur fix preview (5 blurry images):")
+blurry_images_df = df[df['is_blurry']].sample(min(5, blurry_count), random_state=42)
+
+for i, row in blurry_images_df.iterrows():
+    original = cv2.imread(row['path'])
+    sharpened = unsharp_mask(original)
+
+    # Convert BGR (OpenCV) to RGB (matplotlib)
+    original_rgb = cv2.cvtColor(original, cv2.COLOR_BGR2RGB)
+    sharpened_rgb = cv2.cvtColor(sharpened, cv2.COLOR_BGR2RGB)
+
+    # Plotting
+    plt.figure(figsize=(10, 4))
+    plt.subplot(1, 2, 1)
+    plt.imshow(original_rgb)
+    plt.title("Before (Blurry)")
+    plt.axis('off')
+
+    plt.subplot(1, 2, 2)
+    plt.imshow(sharpened_rgb)
+    plt.title("After (Sharpened)")
+    plt.axis('off')
+
+    plt.tight_layout()
+    plt.show()
+
+
+import os
+import torch
+import numpy as np
+from glob import glob
+from PIL import Image
+from torch.utils.data import Dataset, DataLoader
+from torchvision import transforms as T
+from sklearn.model_selection import train_test_split
+import warnings
+warnings.filterwarnings("ignore")
+
+torch.manual_seed(2025)
+
+class CustomDataset(Dataset):
+    def __init__(self, root, transformations=None, im_paths=None, im_lbls=None, im_files=[".png", ".jpg", ".jpeg", ".bmp", ".JPG"]):
+        self.transformations = transformations
+        if im_paths and im_lbls:
+            self.im_paths = im_paths
+            self.im_lbls = im_lbls
+        else:
+            self.im_paths = [path for im_file in im_files for path in glob(f"{root}/*/*{im_file}") if ("assets" not in path) and ("scripts" not in path)]
+
+        self.cls_names, self.cls_counts = {}, {}
+        count = 0
+        for im_path in self.im_paths:
+            class_name = self.get_class(im_path)
+            if class_name not in self.cls_names:
+                self.cls_names[class_name] = count
+                self.cls_counts[class_name] = 1
+                count += 1
+            else:
+                self.cls_counts[class_name] += 1
+
+    def get_class(self, path):
+        return os.path.dirname(path).split("/")[-1]
+
+    def __len__(self):
+        return len(self.im_paths)
+
+    def __getitem__(self, idx):
+        im_path = self.im_paths[idx]
+        im = Image.open(im_path).convert("RGB")
+        gt = self.im_lbls[idx]
+
+        if self.transformations is not None:
+            im = self.transformations(im)
+
+        return im, gt
+
+    @classmethod
+    def stratified_split_dls(cls, root, transformations, bs=8, split=[0.8, 0.1, 0.1], ns=2):
+        dataset = cls(root=root, transformations=transformations)
+        im_paths = dataset.im_paths
+        labels   = [dataset.cls_names[dataset.get_class(p)] for p in im_paths]
+
+        train_paths, temp_paths, train_lbls, temp_lbls = train_test_split(
+            im_paths, labels, test_size=(split[1] + split[2]), stratify=labels, random_state=2025
+        )
+
+        val_ratio = split[1] / (split[1] + split[2])
+        val_paths, test_paths, val_lbls, test_lbls = train_test_split(
+            temp_paths, temp_lbls, test_size=(1 - val_ratio), stratify=temp_lbls, random_state=2025
+        )
+
+        train_ds = cls(root=root, transformations=transformations, im_paths=train_paths, im_lbls=train_lbls)
+        val_ds   = cls(root=root, transformations=transformations, im_paths=val_paths, im_lbls=val_lbls)
+        test_ds  = cls(root=root, transformations=transformations, im_paths=test_paths, im_lbls=test_lbls)
+
+        train_dl = DataLoader(train_ds, batch_size=bs, shuffle=True, num_workers=ns)
+        val_dl   = DataLoader(val_ds, batch_size=bs, shuffle=False, num_workers=ns)
+        test_dl  = DataLoader(test_ds, batch_size=1, shuffle=False, num_workers=ns)
+
+        return train_dl, val_dl, test_dl, dataset.cls_names, [train_ds.cls_counts, val_ds.cls_counts, test_ds.cls_counts]
+
+# ✅ Set the new correct root path
+root = "/content/bone_marrow_data/bone_marrow_500"
+
+# ✅ Image transformation and preprocessing
+mean, std, im_size, bs = [0.485, 0.456, 0.406], [0.229, 0.224, 0.225], 250, 16
+tfs = T.Compose([
+    T.Resize((im_size, im_size)),
+    T.ToTensor(),
+    T.Normalize(mean=mean, std=std)
+])
+
+# ✅ Load the datasets
+tr_dl, val_dl, ts_dl, classes, cls_counts = CustomDataset.stratified_split_dls(root=root, transformations=tfs, bs=bs)
+
+# ✅ Output checks
+print("Train batches:", len(tr_dl))
+print("Validation batches:", len(val_dl))
+print("Test batches:", len(ts_dl))
+print("Classes:", classes)
+
+
+import numpy as np
+from matplotlib import pyplot as plt
+from torchvision import transforms as T
+
+class Visualization:
+
+    def __init__(self, vis_datas, n_ims, rows, cmap=None, cls_names=None, cls_counts=None, t_type="rgb"):
+        self.n_ims, self.rows = n_ims, rows
+        self.t_type, self.cmap = t_type, cmap
+        self.cls_names = cls_names
+
+        data_names = ["train", "val", "test"]
+        self.colors = ["darkorange", "seagreen", "salmon"]
+        self.vis_datas = {data_names[i]: vis_datas[i] for i in range(len(vis_datas))}
+        if isinstance(cls_counts, list):
+            self.analysis_datas = {data_names[i]: cls_counts[i] for i in range(len(cls_counts))}
+        else:
+            self.analysis_datas = {"all": cls_counts}
+
+    def tn2np(self, t):
+        gray_tfs = T.Compose([
+            T.Normalize(mean=[0.], std=[1/0.5]),
+            T.Normalize(mean=[-0.5], std=[1])
+        ])
+        rgb_tfs = T.Compose([
+            T.Normalize(mean=[0., 0., 0.], std=[1/0.229, 1/0.224, 1/0.225]),
+            T.Normalize(mean=[-0.485, -0.456, -0.406], std=[1., 1., 1.])
+        ])
+
+        invTrans = gray_tfs if self.t_type == "gray" else rgb_tfs
+
+        return (invTrans(t) * 255).detach().squeeze().cpu().permute(1, 2, 0).numpy().astype(np.uint8)
+
+    def vis(self, data, save_name):
+        print(f"{save_name.upper()} Data Visualization is in process...\n")
+        assert self.cmap in ["rgb", "gray"], "Please choose rgb or gray cmap"
+        cmap = "viridis" if self.cmap == "rgb" else None
+
+        plt.figure(figsize=(25, 20))
+        indices = np.random.randint(0, len(data), size=self.n_ims)
+
+        for count, index in enumerate(indices, 1):
+            if count > self.n_ims: break
+            image, label = data[index]
+
+            plt.subplot(self.rows, self.n_ims // self.rows, count)
+            if cmap:
+                plt.imshow(self.tn2np(image), cmap=cmap)
+            else:
+                plt.imshow(self.tn2np(image))
+            plt.axis('off')
+            if self.cls_names is not None:
+                plt.title(f"GT -> {self.cls_names[int(label)]}")
+            else:
+                plt.title(f"GT -> {label}")
+
+        plt.tight_layout()
+        plt.show()
+
+    def data_analysis(self, cls_counts, save_name, color):
+        print(f"{save_name.upper()} Data analysis is in process...\n")
+        cls_names = list(cls_counts.keys())
+        counts = list(cls_counts.values())
+        indices = np.arange(len(counts))
+
+        plt.figure(figsize=(20, 10))
+        plt.bar(indices, counts, color=color)
+        plt.xlabel("Class Names", color="black")
+        plt.ylabel("Data Counts", color="black")
+        plt.title(f"{save_name.capitalize()} Dataset Class Distribution")
+        plt.xticks(ticks=indices, labels=cls_names, rotation=90)
+        for i, v in enumerate(counts):
+            plt.text(i - 0.1, v + 1, str(v), color="royalblue")
+        plt.show()
+
+    def plot_pie_chart(self, cls_counts):
+        print("Generating pie chart...\n")
+        labels = list(cls_counts.keys())
+        sizes = list(cls_counts.values())
+        explode = [0.1] * len(labels)
+
+        plt.figure(figsize=(8, 8))
+        plt.pie(sizes, explode=explode, labels=labels, autopct='%1.1f%%', startangle=140, colors=plt.cm.tab20.colors)
+        plt.title("Class Distribution")
+        plt.axis("equal")
+        plt.show()
+
+    def visualization(self):
+        for save_name, data in self.vis_datas.items():
+            self.vis(data.dataset, save_name)
+
+    def analysis(self):
+        for (save_name, data), color in zip(self.analysis_datas.items(), self.colors):
+            self.data_analysis(data, save_name, color)
+
+    def pie_chart(self):
+        for data in self.analysis_datas.values():
+            self.plot_pie_chart(data)
+
+# ✅ Use the visualization class with your loaded data
+vis = Visualization(
+    vis_datas=[tr_dl, val_dl, ts_dl],
+    n_ims=20,
+    rows=4,
+    cmap="rgb",
+    cls_names=list(classes.keys()),
+    cls_counts=cls_counts
+)
+
+# ✅ Perform analysis & visualization
+vis.analysis()
+vis.pie_chart()
+vis.visualization()
+
+
+!pip install torchmetrics
+import os
+import torch
+import timm
+from tqdm import tqdm
+import torchmetrics
+from torchmetrics.classification import MulticlassF1Score
+
+class SimpleTrainer:
+    def __init__(self, model_name, classes, tr_dl, val_dl, device, epochs=10, lr=3e-4, patience=3, save_path="best_model.pth"):
+        self.device = device
+        self.model = timm.create_model(model_name, pretrained=True, num_classes=len(classes)).to(device)
+        self.tr_dl, self.val_dl = tr_dl, val_dl
+        self.loss_fn = torch.nn.CrossEntropyLoss()
+        self.optimizer = torch.optim.Adam(self.model.parameters(), lr=lr)
+        self.f1 = MulticlassF1Score(num_classes=len(classes)).to(device)
+        self.epochs = epochs
+        self.patience = patience
+        self.save_path = save_path
+
+        self.best_f1, self.no_improve = 0, 0
+        self.history = {k: [] for k in ["train_loss", "val_loss", "train_acc", "val_acc", "train_f1", "val_f1"]}
+
+    def run_epoch(self, train=True):
+        self.model.train() if train else self.model.eval()
+        dl = self.tr_dl if train else self.val_dl
+        total_loss, total_correct, total_samples = 0, 0, 0
+        self.f1.reset()
+
+        for x, y in tqdm(dl, desc="Train" if train else "Val"):
+            x, y = x.to(self.device), y.to(self.device)
+
+            with torch.set_grad_enabled(train):
+                pred = self.model(x)
+                loss = self.loss_fn(pred, y)
+                if train:
+                    self.optimizer.zero_grad()
+                    loss.backward()
+                    self.optimizer.step()
+
+            total_loss += loss.item() * y.size(0)
+            total_correct += (pred.argmax(1) == y).sum().item()
+            total_samples += y.size(0)
+            self.f1.update(pred, y)
+
+        avg_loss = total_loss / total_samples
+        acc = total_correct / total_samples
+        f1_score = self.f1.compute().item()
+
+        return avg_loss, acc, f1_score
+
+    def train(self):
+        for epoch in range(self.epochs):
+            print(f"\nEpoch {epoch+1}/{self.epochs}")
+            tr_loss, tr_acc, tr_f1 = self.run_epoch(train=True)
+            val_loss, val_acc, val_f1 = self.run_epoch(train=False)
+
+            print(f"Train -> Loss: {tr_loss:.4f}, Acc: {tr_acc:.4f}, F1: {tr_f1:.4f}")
+            print(f"Val   -> Loss: {val_loss:.4f}, Acc: {val_acc:.4f}, F1: {val_f1:.4f}")
+
+            for k, v in zip(self.history, [tr_loss, val_loss, tr_acc, val_acc, tr_f1, val_f1]):
+                self.history[k].append(v)
+
+            if val_f1 > self.best_f1:
+                self.best_f1 = val_f1
+                torch.save(self.model.state_dict(), self.save_path)
+                print(f"✅ Saved best model (F1: {val_f1:.4f})")
+                self.no_improve = 0
+            else:
+                self.no_improve += 1
+                print(f"⚠️ No improvement ({self.no_improve}/{self.patience})")
+                if self.no_improve >= self.patience:
+                    print("🛑 Early stopping")
+                    break
+
+# Define the device
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+trainer = SimpleTrainer("rexnet_150", classes, tr_dl, val_dl, device)
+trainer.train()
+
+import matplotlib.pyplot as plt
+import numpy as np
+
+class PlotLearningCurves:
+
+    def __init__(self, tr_loss, val_loss, tr_acc, val_acc, tr_f1, val_f1):
+
+        self.tr_loss, self.val_loss, self.tr_acc, self.val_acc, self.tr_f1, self.val_f1 = tr_loss, val_loss, tr_acc, val_acc, tr_f1, val_f1
+
+    def plot(self, array_1, array_2, label_1, label_2, color_1, color_2):
+
+        plt.plot(array_1, label = label_1, c = color_1)
+        plt.plot(array_2, label = label_2, c = color_2)
+
+    def create_figure(self):
+        plt.figure(figsize = (10, 5))
+
+    def decorate(self, ylabel, xlabel = "Epochs"):
+
+        plt.xlabel(xlabel)
+        plt.ylabel(ylabel)
+        plt.xticks(ticks = np.arange(len(self.tr_acc)), labels = [i for i in range(1, len(self.tr_acc) + 1)])
+        plt.legend()
+        plt.show()
+
+    def visualize(self):
+
+        # Figure 1: Loss Curves with more colorful colors
+        self.create_figure()
+        self.plot(array_1 = self.tr_loss, array_2 = self.val_loss, label_1 = "Train Loss", label_2 = "Validation Loss", color_1 = "#FF6347", color_2 = "#3CB371")  # Tomato and MediumSeaGreen
+        self.decorate(ylabel = "Loss Values")
+
+        # Figure 2: Accuracy Curves with more colorful colors
+        self.create_figure()
+        self.plot(array_1 = self.tr_acc, array_2 = self.val_acc, label_1 = "Train Accuracy", label_2 = "Validation Accuracy", color_1 = "#FF4500", color_2 = "#32CD32")  # OrangeRed and LimeGreen
+        self.decorate(ylabel = "Accuracy Scores")
+
+        # Figure 3: F1 Score Curves with more colorful colors
+        self.create_figure()
+        self.plot(array_1 = self.tr_f1, array_2 = self.val_f1, label_1 = "Train F1 Score", label_2 = "Validation F1 Score", color_1 = "#8A2BE2", color_2 = "#DC143C")  # BlueViolet and Crimson
+        self.decorate(ylabel = "F1 Scores")
+
+# Pass the history attribute from the trainer object
+PlotLearningCurves(tr_loss=trainer.history['train_loss'], val_loss=trainer.history['val_loss'], tr_acc=trainer.history['train_acc'], val_acc=trainer.history['val_acc'], tr_f1=trainer.history['train_f1'], val_f1=trainer.history['val_f1']).visualize()
+
+!pip install grad-cam==1.4.6
+import torch
+import torch.nn.functional as F
+import matplotlib.pyplot as plt
+import seaborn as sns
+import numpy as np
+import random
+from tqdm import tqdm
+from pytorch_grad_cam import GradCAMPlusPlus
+from pytorch_grad_cam.utils.image import show_cam_on_image
+from sklearn.metrics import confusion_matrix
+import torchmetrics
+import timm # Import timm
+
+class ModelVisualizer:
+    def __init__(self, model, device, class_names, mean, std, im_size=224):
+        self.model = model.eval().to(device)
+        self.device = device
+        self.class_names = class_names
+        self.im_size = im_size
+        self.denormalize = lambda x: x.mul(torch.tensor(std)[:, None, None]).add(torch.tensor(mean)[:, None, None])
+        self.f1 = torchmetrics.F1Score(task="multiclass", num_classes=len(class_names)).to(device)
+
+    def predict(self, dataloader):
+        all_preds, all_labels, all_logits, all_images = [], [], [], []
+
+        with torch.no_grad():
+            for imgs, labels in tqdm(dataloader, desc="Inference"):
+                imgs, labels = imgs.to(self.device), labels.to(self.device)
+                logits = self.model(imgs)
+                preds = logits.argmax(dim=1)
+
+                self.f1.update(logits, labels)
+                all_preds += preds.cpu().tolist()
+                all_labels += labels.cpu().tolist()
+                all_logits.append(logits.cpu())
+                all_images.append(imgs.cpu())
+
+        all_logits = torch.cat(all_logits)
+        all_images = torch.cat(all_images)
+
+        acc = np.mean(np.array(all_preds) == np.array(all_labels))
+        f1_score = self.f1.compute().item()
+        return all_images, all_logits, all_preds, all_labels, acc, f1_score
+
+    def show_gradcam(self, img_tensor):
+        # Untuk model RexNet dari timm, gunakan layer terakhir dari fitur extractor
+        target_layers = [self.model.features[-1]]
+
+        cam = GradCAMPlusPlus(model=self.model, target_layers=target_layers,
+                              use_cuda=self.device == "cuda")
+        grayscale_cam = cam(input_tensor=img_tensor.unsqueeze(0))[0]
+        return grayscale_cam
+
+    def visualize(self, images, logits, preds, labels, num_samples=6):
+        indices = random.sample(range(len(images)), num_samples)
+        fig, axs = plt.subplots(num_samples, 2, figsize=(12, 3 * num_samples))
+
+        for i, idx in enumerate(indices):
+            img = self.denormalize(images[idx]).permute(1, 2, 0).numpy().clip(0, 1)
+            cam_mask = self.show_gradcam(images[idx].to(self.device))
+            cam_img = show_cam_on_image(img, cam_mask, use_rgb=True)
+
+            axs[i, 0].imshow(cam_img)
+            axs[i, 0].axis("off")
+            gt = self.class_names[labels[idx]]
+            pred = self.class_names[preds[idx]]
+            color = "green" if gt == pred else "red"
+            axs[i, 0].set_title(f"GT: {gt} | Pred: {pred}", color=color)
+
+            probs = F.softmax(logits[idx], dim=0).numpy()
+            sns.barplot(x=self.class_names, y=probs, ax=axs[i, 1])
+            axs[i, 1].set_ylim(0, 1)
+            axs[i, 1].set_xticklabels(self.class_names, rotation=45)
+            axs[i, 1].set_ylabel("Confidence")
+
+        plt.tight_layout()
+        plt.show()
+
+    def plot_confusion_matrix(self, preds, labels):
+        cm = confusion_matrix(labels, preds)
+        plt.figure(figsize=(8, 6))
+        sns.heatmap(cm, annot=True, fmt='d', xticklabels=self.class_names, yticklabels=self.class_names, cmap='Blues')
+        plt.title("Confusion Matrix")
+        plt.xlabel("Predicted")
+        plt.ylabel("Actual")
+        plt.tight_layout()
+        plt.show()
+
+# Inisialisasi model dan visualizer
+# Define save_dir and save_prefix if not already defined
+save_dir = "."
+save_prefix = "best_model"
+model_name = "rexnet_150" # Define model_name here as well
+
+model = timm.create_model(model_name, pretrained=True, num_classes=len(classes))
+# Load the model state dictionary from the correct path
+model.load_state_dict(torch.load(f"{save_dir}/{save_prefix}.pth"))
+
+visualizer = ModelVisualizer(
+    model=model,
+    device=device, # Use the defined device variable
+    class_names=list(classes.keys()),
+    mean=mean,
+    std=std,
+    im_size=im_size
+)
+
+images, logits, preds, labels, acc, f1 = visualizer.predict(ts_dl)
+print(f"Accuracy: {acc:.4f}")
+print(f"F1 Score: {f1:.4f}")
+visualizer.visualize(images, logits, preds, labels, num_samples=10)
+visualizer.plot_confusion_matrix(preds, labels)
+
+# Save the trained model
+torch.save(trainer.model.state_dict(), "bone_marrow_model.pth")
+
+# Download it to your local computer
+from google.colab import files
+files.download("bone_marrow_model.pth")
