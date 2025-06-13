@@ -18,19 +18,27 @@ Proyek ini bertujuan untuk mengklasifikasikan sel-sel sumsum tulang menjadi tuju
 - Visualisasi performa model: Loss, Akurasi, dan F1-Score
 - Analisis distribusi data kelas dalam bentuk bar chart dan pie chart
 
-## 🖼️ GUI
-
-👉 Coba aplikasi secara langsung: [🔗 Hugging Face Space](https://huggingface.co/spaces/Finpropsmkel3/bone-marrow-classifier-gui/tree/main)
-
-🧠 Untuk Melatih Model Sendiri (Opsional)
-Gunakan file bonemarrow.py di Google Colab untuk melatih model menggunakan DataLoader dan kelas visualisasi yang efisien.
-
 📊 Hasil Pelatihan
+
 Akurasi Training: ~96%
 
 Akurasi Validasi: ~79%
 
 F1 Score (Validasi): ~0.79
 
+## 🖼️ GUI
+
+👉 Coba aplikasi secara langsung: [🔗 Hugging Face Space](https://huggingface.co/spaces/Finpropsmkel3/bone-marrow-classifier-gui/tree/main)
+
+## ▶️ Lampiran Tautan
+
+📄 Kode Program Kami: [🔗 Google Colab](https://colab.research.google.com/drive/1hjX2By_O8tePe4ajHOs55wlN7ha3fdku?usp=sharing)
+
+🧠 Dataset: 
+[🔗 For Training](https://drive.google.com/drive/folders/1ID8L4sfX80BjmAtt9jvzUAiP5NjFhVB0?usp=sharing)
+[🔗 For GUI](https://drive.google.com/drive/folders/1iDF_jcVEMP6cvj1_JCbO5-1Xkwixj09i?usp=drive_link)
+
 📚 Referensi
 Matek, C., Schwarz, S., Spiekermann, K., & Marr, C. (2021). Human-level recognition of blast cells in acute myeloid leukaemia with convolutional neural networks. Nature Machine Intelligence, 3(3), 251–258. DOI: 10.1038/s42256-021-00336-0
+
+
