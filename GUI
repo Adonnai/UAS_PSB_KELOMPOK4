@@ -1,6 +1,5 @@
 //GUI dilakukan pada Hugging Face, ini hanya kode yang di masukkan dari Hugging Face-nya//
 
-//
 **app.py**
 import gradio as gr
 import torch
@@ -49,16 +48,17 @@ demo = gr.Interface(
 )
 
 demo.launch(share=True)
-//
 
 
-//
+
+
+
 **requirements.txt**
 gradio
 torch
 torchvision
 timm
 Pillow
-//
+
 
 
